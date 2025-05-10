@@ -1,10 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, TextInput, StyleSheet,
-  TouchableOpacity, ScrollView, Image
+  TouchableOpacity, ScrollView, Image,
+  Alert
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams } from 'expo-router';
+import { Databases, ID } from 'appwrite';
+import { databases } from '../lib/appwrite';
+
+const DATABASE_ID = '681c428b00159abb5e8b';
+const COLLECTION_ID = '681f3578000b1b1fa716';
 
 const BillPage = () => {
   const params = useLocalSearchParams();
@@ -16,11 +22,109 @@ const BillPage = () => {
     contactNumber: '',
     serviceCharge: '',
   });
-
+  const [bills, setBills] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [cashGiven, setCashGiven] = useState('');
   const [isFormVisible, setIsFormVisible] = useState(false);
   const [gstRate] = useState(0.25); // 25% GST
+
+  useEffect(() => {
+    fetchBills();
+  }, []);
+
+  const fetchBills = async () => {
+    setIsLoading(true);
+    try {
+      const response = await databases.listDocuments(
+        DATABASE_ID,
+        COLLECTION_ID,
+      );
+      setBills(response.documents);
+    } catch (error) {
+      console.error('Error fetching bills:', error);
+      Alert.alert('Error', 'Failed to fetch bills');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Add the validateForm function
+  const validateForm = () => {
+    if (!form.serviceType.trim()) {
+      Alert.alert('Error', 'Service type is required');
+      return false;
+    }
+    if (!form.serviceBoyName.trim()) {
+      Alert.alert('Error', 'Service boy name is required');
+      return false;
+    }
+    if (!form.customerName.trim()) {
+      Alert.alert('Error', 'Customer name is required');
+      return false;
+    }
+    if (!form.address.trim()) {
+      Alert.alert('Error', 'Address is required');
+      return false;
+    }
+    if (!form.contactNumber.trim() || !/^\d{10}$/.test(form.contactNumber)) {
+      Alert.alert('Error', 'Valid 10-digit contact number is required');
+      return false;
+    }
+    if (!form.serviceCharge.trim() || isNaN(parseFloat(form.serviceCharge))) {
+      Alert.alert('Error', 'Valid service charge is required');
+      return false;
+    }
+    if (paymentMethod === 'cash' && (!cashGiven.trim() || isNaN(parseFloat(cashGiven)))) {
+      Alert.alert('Error', 'Valid cash amount is required');
+      return false;
+    }
+    return true;
+  };
+
+  const handleSubmitBill = async () => {
+    if (!validateForm()) return;
+
+    const billData = {
+      ...form,
+      paymentMethod,
+      gst: calculateGST(),
+      total: calculateTotal(),
+      cashGiven: paymentMethod === 'cash' ? cashGiven : null,
+      change: paymentMethod === 'cash' ? calculateChange() : null,
+      date: new Date().toISOString()
+    };
+
+    try {
+      await databases.createDocument(
+        DATABASE_ID,
+        COLLECTION_ID,
+        ID.unique(),
+        billData
+      );
+      
+      Alert.alert('Success', 'Bill saved successfully!');
+      fetchBills(); // Refresh the bills list
+      setIsFormVisible(false);
+      resetForm();
+    } catch (error) {
+      console.error('Error saving bill:', error);
+      Alert.alert('Error', 'Failed to save bill');
+    }
+  };
+
+  const resetForm = () => {
+    setForm({
+      serviceType: '',
+      serviceBoyName: '',
+      customerName: '',
+      address: '',
+      contactNumber: '',
+      serviceCharge: '',
+    });
+    setPaymentMethod('cash');
+    setCashGiven('');
+  };
 
   useEffect(() => {
     if (params.serviceData) {
@@ -64,6 +168,9 @@ const BillPage = () => {
 
   const toggleFormVisibility = () => {
     setIsFormVisible(!isFormVisible);
+    if (!isFormVisible) {
+      resetForm();
+    }
   };
 
   return (
@@ -114,7 +221,6 @@ const BillPage = () => {
               </TouchableOpacity>
             </View>
 
-
             {/* Payment Details */}
             {paymentMethod === 'cash' && (
               <View style={styles.cashContainer}>
@@ -144,24 +250,41 @@ const BillPage = () => {
               </View>
             )}
 
-            <TouchableOpacity style={styles.submitButton} onPress={() => {
-              console.log("Bill Details:", {
-                ...form,
-                paymentMethod,
-                gst: calculateGST(),
-                total: calculateTotal(),
-                cashGiven: paymentMethod === 'cash' ? cashGiven : null,
-                change: paymentMethod === 'cash' ? calculateChange() : null
-              });
-              setIsFormVisible(false);
-            }}>
+            <TouchableOpacity style={styles.submitButton} onPress={handleSubmitBill}>
               <Text style={styles.submitText}>Submit Bill</Text>
             </TouchableOpacity>
           </>
         ) : (
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyText}>No bills created yet</Text>
-            <Text style={styles.emptySubtext}>Tap the + button to create a new bill</Text>
+          <View style={styles.billsContainer}>
+            <Text style={styles.sectionTitle}>Recent Bills</Text>
+            
+            {isLoading ? (
+              <Text>Loading bills...</Text>
+            ) : bills.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyText}>No bills created yet</Text>
+                <Text style={styles.emptySubtext}>Tap the + button to create a new bill</Text>
+              </View>
+            ) : (
+              bills.map((bill, index) => (
+                <TouchableOpacity 
+                  key={bill.$id} 
+                  style={styles.billCard}
+                  onPress={() => {
+                    // Optionally view/edit bill details
+                  }}
+                >
+                  <View style={styles.billHeader}>
+                    <Text style={styles.billCustomer}>{bill.customerName}</Text>
+                    <Text style={styles.billAmount}>₹{bill.total}</Text>
+                  </View>
+                  <Text style={styles.billService}>{bill.serviceType}</Text>
+                  <Text style={styles.billDate}>
+                    {new Date(bill.date).toLocaleDateString()}
+                  </Text>
+                </TouchableOpacity>
+              ))
+            )}
           </View>
         )}
       </ScrollView>
@@ -174,6 +297,44 @@ const BillPage = () => {
 };
 
 const styles = StyleSheet.create({
+  billsContainer: {
+  flex: 1,
+  marginTop: 20,
+},
+billCard: {
+  backgroundColor: '#fff',
+  borderRadius: 10,
+  padding: 15,
+  marginBottom: 10,
+  shadowColor: '#000',
+  shadowOffset: { width: 0, height: 2 },
+  shadowOpacity: 0.1,
+  shadowRadius: 4,
+  elevation: 3,
+},
+billHeader: {
+  flexDirection: 'row',
+  justifyContent: 'space-between',
+  marginBottom: 5,
+},
+billCustomer: {
+  fontSize: 16,
+  fontWeight: 'bold',
+},
+billAmount: {
+  fontSize: 16,
+  fontWeight: 'bold',
+  color: '#007bff',
+},
+billService: {
+  fontSize: 14,
+  color: '#555',
+  marginBottom: 5,
+},
+billDate: {
+  fontSize: 12,
+  color: '#888',
+},
   mainContainer: {
     flex: 1,
     position: 'relative',

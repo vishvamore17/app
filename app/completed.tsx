@@ -136,7 +136,6 @@ const HomeScreen = () => {
   </TouchableOpacity>
 );
 
-
   const renderHeader = () => (
     <View style={styles.tableHeader}>
       <View style={styles.tableHeaderCell}>
